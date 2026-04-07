@@ -1,0 +1,16 @@
+version: '3.8'
+services:
+  backend:
+    image: transport-web-backend
+    ports:
+      - "8090:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  frontend:
+    image: transport-web-frontend
+    ports:
+      - "3000:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped
