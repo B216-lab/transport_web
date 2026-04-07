@@ -12,7 +12,7 @@ pipeline {
                 // Клонируем репозиторий с GitHub (замените на ваш URL, если нужно)
                 // Если репозиторий публичный, хватит и этого.
                 // Если приватный, добавьте credentialsId: 'github-credentials'
-                git url: 'https://github.com/ВАШ_АККАУНТ/transport-web.git',
+                git url: 'https://github.com/B216-lab/transport_web.git',
                     branch: 'main'
             }
         }
