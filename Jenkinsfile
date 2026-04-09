@@ -1,39 +1,29 @@
 pipeline {
     agent any
 
-    triggers {
-        cron('*/1 * * * *')  // Каждую минуту
-    }
-
     stages {
-        stage('Checkout') {
+        stage('Deploy') {
             steps {
-                echo '🔄 Клонируем репозиторий...'
-                git url: 'https://github.com/B216-lab/transport_web.git',
-                    branch: 'main'
-                
-                echo '✅ Репозиторий успешно склонирован!'
-            }
-        }
-        
-        stage('Verify Files') {
-            steps {
-                echo '📋 Проверяем наличие файлов...'
-                sh 'ls -la'
-                sh 'ls -la backend/ || echo "Папка backend не найдена"'
-                sh 'ls -la frontend/ || echo "Папка frontend не найдена"'
-                sh 'ls -la docker-compose.yml || echo "docker-compose.yml не найден"'
-                sh 'ls -la Jenkinsfile && echo "Jenkinsfile найден ✅"'
-            }
-        }
-    }
+                sh '''
+                    set -e
+                    cd /opt/proj3/transport-web
 
-    post {
-        success {
-            echo '✅ Пайплайн успешно выполнен! Репозиторий готов.'
-        }
-        failure {
-            echo '❌ Ошибка в пайплайне. Проверьте логи.'
+                    git fetch origin main
+                    git checkout server-local
+
+                    if git merge origin/main --no-edit 2>/dev/null; then
+                        :
+                    else
+                        git reset --hard origin/main
+                    fi
+                    
+                    git status
+
+                    docker compose down
+                    docker compose up -d --build
+                    docker compose ps
+                '''
+            }
         }
     }
 }
