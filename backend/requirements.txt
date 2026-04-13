@@ -1,5 +1,7 @@
 fastapi
 uvicorn[standard]
 python-dateutil
-shapely
+shapely>=2.0.0
+pyproj
 pydantic
+requests

@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "chartjs-plugin-zoom": "^2.2.0",
+    "hammerjs": "^2.0.8"
+  }
+}
