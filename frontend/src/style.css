@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+#app {
+  width: 100%;
+}
+
+/* Leaflet Overrides */
+.leaflet-container {
+  font-family: inherit;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 1cm;
+  }
+
+  /* Hide everything we don't want */
+  aside, button, .leaflet-control-container, .group[class*="cursor-row-resize"] {
+    display: none !important;
+  }
+  
+  /* Reset body and hide scrollbars */
+  body, html, #app {
+    margin: 0;
+    padding: 0;
+    height: 100vh !important;
+    width: 100vw !important;
+    overflow: hidden !important;
+    background: white;
+  }
+  
+  /* Container holds everything in column */
+  .flex.h-screen {
+    height: 100% !important;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  main {
+    height: 100% !important;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Map gets the majority of the space */
+  .grow.relative.min-h-0.bg-gray-100 {
+    flex: 1 1 auto !important;
+    height: 60vh !important;
+  }
+
+  /* Chart & Stats gets fixed space at bottom */
+  .flex-shrink-0.bg-white.border-t {
+    flex: 0 0 auto !important;
+    height: 35vh !important;
+    page-break-inside: avoid;
+  }
+
+  /* Ensure Leaflet correctly fits the container */
+  .leaflet-container {
+    background: #f1f5f9 !important;
+    height: 100% !important;
+    width: 100% !important;
+  }
+
+  /* Make sure chart looks fine and fits */
+  .custom-scrollbar {
+    overflow: hidden !important;
+  }
+  
+  canvas {
+    max-height: 100% !important;
+  }
+}
