@@ -152,6 +152,10 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
+@app.options("/analyze")
+async def options_analyze():
+    return {"message": "OK"}
+
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     try:
