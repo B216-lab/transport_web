@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Upload, Play, Trash2, Download, Activity, Cl
 const props = defineProps(['isOpen'])
 const emit = defineEmits(['toggle', 'analysis-complete'])
 
-const API_URL = "http://127.0.0.1:8000/analyze"
+const API_URL = "http://79.174.78.223:8090/analyze"
 const isLoading = inject('isLoading')
 const analysisAreaGeometry = inject('analysisAreaGeometry')
 
