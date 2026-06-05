@@ -11,8 +11,21 @@ import logging
 from shapely.geometry import MultiPoint, mapping
 from zoneinfo import ZoneInfo
 
-from models import AnalyzeRequest, AnalyzeDbRequest, ParserStartRequest, PedestrianIsochroneRequest
+from models import (
+    AnalyzeRequest,
+    AnalyzeDbRequest,
+    ParserStartRequest,
+    PedestrianIsochroneRequest,
+    TransitIsochroneRequest,
+)
 from isochrone.pedestrian import compute_pedestrian_isochrones
+from isochrone.transit import compute_transit_isochrones
+from isochrone.graph_geojson import pedestrian_graph_geojson_in_bbox
+from isochrone.pt_analysis import (
+    compute_route_telemetry_stats,
+    compute_segment_telemetry_stats,
+)
+from pt_network_store import default_pt_pickle_path
 from utils import parse_time, build_analysis_geometry_checker
 from services import (
     calculate_statistics,
@@ -23,7 +36,8 @@ from services import (
     compute_flow_directions,
 )
 from parser_control import parser_manager
-from graph_store import default_geojson_path, default_pickle_path, graph_summary
+from graph_store import default_geojson_path, default_pickle_path, graph_summary, load_pedestrian_graph
+from data_paths import default_buildings_path, default_contours_path
 try:
     from dotenv import load_dotenv
 except Exception:  # pragma: no cover
@@ -431,6 +445,7 @@ async def analyze(req: AnalyzeRequest):
         elif speeds:
             congestion_index = 10 # 0 avg speed means max congestion
 
+        segment_stats = compute_segment_telemetry_stats(filtered_points)
         result = {
             "avg_speed": avg_speed if speeds else None,
             "congestion_index": congestion_index,
@@ -440,6 +455,11 @@ async def analyze(req: AnalyzeRequest):
             "congestion_zones": [],
             "plot": {"times": [], "speeds": []},
             "statistics": calculate_statistics(speeds) if speeds else {},
+            "segment_stats": segment_stats,
+            "route_stats": compute_route_telemetry_stats(
+                filtered_points, segment_stats=segment_stats
+            ),
+            "analysis_period": {"start": req.start, "end": req.end},
             "warnings": [],
         }
 
@@ -555,22 +575,27 @@ async def analyze_db(req: AnalyzeDbRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _intervals_from_request(req: PedestrianIsochroneRequest) -> List[float]:
+    if req.intervals_min:
+        intervals = sorted({float(x) for x in req.intervals_min if float(x) > 0})
+    else:
+        intervals = [req.interval_step_min * (i + 1) for i in range(req.interval_count)]
+    if not intervals:
+        raise HTTPException(status_code=400, detail="Не заданы положительные интервалы времени")
+    return intervals
+
+
 @app.post("/isochrone/pedestrian")
 async def isochrone_pedestrian(req: PedestrianIsochroneRequest):
     try:
-        if req.intervals_min:
-            intervals = sorted({float(x) for x in req.intervals_min if float(x) > 0})
-        else:
-            intervals = [
-                req.interval_step_min * (i + 1) for i in range(req.interval_count)
-            ]
-        if not intervals:
-            raise HTTPException(status_code=400, detail="Не заданы положительные интервалы времени")
+        intervals = _intervals_from_request(req)
         return compute_pedestrian_isochrones(
             origin_lon=req.origin[0],
             origin_lat=req.origin[1],
             intervals_min=intervals,
             max_snap_m=req.max_snap_m,
+            use_elevation=req.use_elevation,
+            include_building_stats=req.include_building_stats,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -579,6 +604,79 @@ async def isochrone_pedestrian(req: PedestrianIsochroneRequest):
     except Exception as e:
         logger.error("isochrone_pedestrian: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/isochrone/transit")
+async def isochrone_transit(req: TransitIsochroneRequest):
+    try:
+        intervals = _intervals_from_request(req)
+        return compute_transit_isochrones(
+            origin_lon=req.origin[0],
+            origin_lat=req.origin[1],
+            intervals_min=intervals,
+            max_snap_m=req.max_snap_m,
+            use_elevation=req.use_elevation,
+            include_building_stats=req.include_building_stats,
+            max_transfers=req.max_transfers,
+            max_walk_to_stop_m=req.max_walk_to_stop_m,
+            pt_speed_kmh=req.pt_speed_kmh,
+            route_speeds=req.route_speeds,
+            segment_speeds=req.segment_speeds,
+            route_headways=req.route_headways,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("isochrone_transit: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/isochrone/data-status")
+async def isochrone_data_status():
+    """Наличие опциональных слоёв этапа 3: изолинии и здания."""
+    pkl = default_pickle_path()
+    has_elevation_in_graph = False
+    if os.path.isfile(pkl):
+        try:
+            g = load_pedestrian_graph(pkl)
+            has_elevation_in_graph = bool((g.get("meta") or {}).get("has_elevation"))
+        except Exception:
+            pass
+    contours = default_contours_path()
+    buildings = default_buildings_path()
+    pt_pkl = default_pt_pickle_path()
+    pt_ready = os.path.isfile(pt_pkl)
+    pt_meta = {}
+    if pt_ready:
+        try:
+            from pt_network_store import load_pt_network
+
+            pt_meta = load_pt_network(pt_pkl).get("meta") or {}
+        except Exception:
+            pt_ready = False
+    return {
+        "contours_path": contours,
+        "contours_available": contours is not None,
+        "buildings_path": buildings,
+        "buildings_available": buildings is not None,
+        "graph_has_elevation": has_elevation_in_graph,
+        "enrich_hint": (
+            "python -m scripts.enrich_pedestrian_graph"
+            if contours and not has_elevation_in_graph
+            else None
+        ),
+        "pt_network_ready": pt_ready,
+        "pt_network_path": pt_pkl,
+        "pt_stop_count": pt_meta.get("stop_count"),
+        "pt_route_count": pt_meta.get("route_count"),
+        "pt_build_hint": (
+            None
+            if pt_ready
+            else "python -m scripts.build_pt_network --from-db"
+        ),
+    }
 
 
 @app.get("/graph/pedestrian/status")
@@ -598,8 +696,42 @@ async def pedestrian_graph_status():
             ),
         }
     try:
-        return {"ready": True, "pickle_path": pkl, **graph_summary(pkl)}
+        summary = graph_summary(pkl)
+        g = load_pedestrian_graph(pkl)
+        summary["has_elevation"] = bool((g.get("meta") or {}).get("has_elevation"))
+        return {"ready": True, "pickle_path": pkl, **summary}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/graph/pedestrian/geojson")
+async def pedestrian_graph_geojson(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    limit: int = 6000,
+):
+    """
+    Рёбра пешего графа в bbox карты (для подсказки, куда ставить точку).
+    limit ≤ 15000.
+    """
+    limit = max(100, min(int(limit), 15000))
+    pkl = default_pickle_path()
+    if not os.path.isfile(pkl):
+        raise HTTPException(
+            status_code=503,
+            detail="Пеший граф не собран. Выполните build_pedestrian_graph.",
+        )
+    try:
+        g = load_pedestrian_graph(pkl)
+        return pedestrian_graph_geojson_in_bbox(
+            g, min_lon, min_lat, max_lon, max_lat, limit=limit
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error("pedestrian_graph_geojson: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

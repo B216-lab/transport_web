@@ -104,7 +104,7 @@ class AnalyzeDbRequest(BaseModel):
 
 
 class PedestrianIsochroneRequest(BaseModel):
-    """Запрос пеших изохрон (этап 2). origin — [longitude, latitude] WGS84."""
+    """Запрос пеших изохрон. origin — [longitude, latitude] WGS84."""
 
     origin: List[float] = Field(..., min_length=2, max_length=2, description="[lon, lat]")
     interval_step_min: float = Field(5.0, gt=0, le=120, description="Шаг интервала, минуты")
@@ -113,6 +113,14 @@ class PedestrianIsochroneRequest(BaseModel):
     intervals_min: Optional[List[float]] = Field(
         None,
         description="Явный список порогов в минутах; если задан — interval_step/count игнорируются",
+    )
+    use_elevation: bool = Field(
+        True,
+        description="Учитывать рельеф (adj_elevation в графе). Если нет — плоский граф.",
+    )
+    include_building_stats: bool = Field(
+        True,
+        description="Считать население и число зданий в зонах (buildings.geojson).",
     )
 
     @validator("origin")
@@ -123,21 +131,31 @@ class PedestrianIsochroneRequest(BaseModel):
         return [lon, lat]
 
 
-class PedestrianIsochroneRequest(BaseModel):
-    """Запрос пеших изохрон (этап 2). origin — [longitude, latitude] WGS84."""
+class TransitIsochroneRequest(PedestrianIsochroneRequest):
+    """Изохроны с ОТ (ожидание + пересадки)."""
 
-    origin: List[float] = Field(..., min_length=2, max_length=2, description="[lon, lat]")
-    interval_step_min: float = Field(5.0, gt=0, le=120, description="Шаг интервала, минуты")
-    interval_count: int = Field(3, ge=1, le=10, description="Число зон (5, 10, 15 при шаге 5)")
-    max_snap_m: float = Field(80.0, gt=0, le=500, description="Допуск привязки точки к графу, м")
-    intervals_min: Optional[List[float]] = Field(
-        None,
-        description="Явный список порогов в минутах; если задан — interval_step/count игнорируются",
+    max_transfers: int = Field(1, ge=0, le=3, description="Макс. число пересадок")
+    max_walk_to_stop_m: float = Field(
+        600.0,
+        gt=50,
+        le=2000,
+        description="Макс. расстояние пешком до ОП для посадки, м",
     )
-
-    @validator("origin")
-    def validate_origin(cls, v):
-        lon, lat = float(v[0]), float(v[1])
-        if not (-180 <= lon <= 180 and -90 <= lat <= 90):
-            raise ValueError("origin must be valid WGS84 coordinates [lon, lat]")
-        return [lon, lat]
+    pt_speed_kmh: Optional[float] = Field(
+        None,
+        gt=0,
+        le=120,
+        description="Скорость ОТ (км/ч) по умолчанию, если нет данных по маршруту",
+    )
+    route_speeds: Optional[Dict[str, float]] = Field(
+        None,
+        description="Скорость по маршрутам route_num -> km/h из анализа",
+    )
+    route_headways: Optional[Dict[str, float]] = Field(
+        None,
+        description="Интервал движения по маршрутам route_num -> мин из анализа",
+    )
+    segment_speeds: Optional[Dict[str, float]] = Field(
+        None,
+        description="Скорость по сегментам route|from_stop|to_stop -> km/h из анализа",
+    )

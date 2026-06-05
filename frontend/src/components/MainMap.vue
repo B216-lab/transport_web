@@ -5,6 +5,8 @@ import 'leaflet-draw'
 import 'leaflet-draw/dist/leaflet.draw.css'
 import 'leaflet.heat'
 import { Layers } from 'lucide-vue-next'
+import axios from 'axios'
+import { API_BASE } from '../apiBase.js'
 
 const props = defineProps(['data', 'height'])
 const mapContainer = ref(null)
@@ -13,12 +15,13 @@ const analysisAreaGeometry = inject('analysisAreaGeometry')
 const isochroneOrigin = inject('isochroneOrigin', null)
 const isochroneResult = inject('isochroneResult', null)
 const isochronePickMode = inject('isochronePickMode', null)
-
+const showPedestrianGraph = inject('showPedestrianGraph', null)
 let map = null
 let routeLayer = null
 let congestionLayer = null
 let heatLayer = null
 let isochroneLayer = null
+let pedGraphLayer = null
 let originMarker = null
 let drawnItems = null
 let canvasRenderer = null
@@ -92,6 +95,10 @@ onMounted(() => {
     }
   })
 
+  map.on('moveend', () => {
+    schedulePedGraphRefresh()
+  })
+
   // Wait for parent layout to stabilize
   setTimeout(() => {
     map.invalidateSize()
@@ -101,6 +108,78 @@ onMounted(() => {
 onUnmounted(() => {
   if (map) map.remove()
 })
+
+let pedGraphFetchTimer = null
+let pedGraphAbort = null
+
+const refreshPedGraphLayer = async () => {
+  if (!map || !showPedestrianGraph?.value) {
+    if (pedGraphLayer) {
+      map?.removeLayer(pedGraphLayer)
+      pedGraphLayer = null
+    }
+    return
+  }
+
+  const b = map.getBounds()
+  const params = {
+    min_lon: b.getWest(),
+    min_lat: b.getSouth(),
+    max_lon: b.getEast(),
+    max_lat: b.getNorth(),
+    limit: 6000,
+  }
+
+  if (pedGraphAbort) pedGraphAbort.abort()
+  pedGraphAbort = new AbortController()
+
+  try {
+    const { data } = await axios.get(`${API_BASE}/graph/pedestrian/geojson`, {
+      params,
+      signal: pedGraphAbort.signal,
+    })
+    if (!showPedestrianGraph?.value || !map) return
+
+    if (pedGraphLayer) {
+      map.removeLayer(pedGraphLayer)
+      pedGraphLayer = null
+    }
+
+    const fc = data?.features?.length ? data : null
+    if (!fc) return
+
+    pedGraphLayer = L.geoJSON(fc, {
+      style: {
+        color: '#64748b',
+        weight: 1.2,
+        opacity: 0.55,
+      },
+      interactive: false,
+    })
+    pedGraphLayer.addTo(map)
+    pedGraphLayer.bringToBack()
+  } catch (e) {
+    if (e?.code !== 'ERR_CANCELED') {
+      console.warn('ped graph layer', e)
+    }
+  }
+}
+
+const schedulePedGraphRefresh = () => {
+  if (pedGraphFetchTimer) clearTimeout(pedGraphFetchTimer)
+  pedGraphFetchTimer = setTimeout(refreshPedGraphLayer, 350)
+}
+
+watch(
+  () => showPedestrianGraph?.value,
+  (on) => {
+    if (on) schedulePedGraphRefresh()
+    else if (pedGraphLayer && map) {
+      map.removeLayer(pedGraphLayer)
+      pedGraphLayer = null
+    }
+  },
+)
 
 const getSpeedColor = (s) => {
   if (s < 10) return "#ef4444" // Red
@@ -153,15 +232,24 @@ const drawIsochroneLayers = () => {
 
   const fc = isochroneResult?.value?.geojson
   if (fc?.features?.length) {
-    isochroneLayer = L.geoJSON(fc, {
-      filter: (f) => f.properties?.role !== 'origin' && f.properties?.role !== 'snapped_node',
+    const zoneFeatures = [...fc.features]
+      .filter((f) => f.properties?.role !== 'origin' && f.properties?.role !== 'snapped_node')
+      .sort(
+        (a, b) =>
+          (b.properties?.interval_min ?? 0) - (a.properties?.interval_min ?? 0),
+      )
+    isochroneLayer = L.geoJSON(
+      { type: 'FeatureCollection', features: zoneFeatures },
+      {
+      filter: () => true,
       style: (f) => {
         const c = f.properties?.fill_color || '#3b82f6'
         return {
           color: c,
           weight: 2,
           fillColor: c,
-          fillOpacity: 0.28,
+          fillOpacity: 0.35,
+          opacity: 0.9,
         }
       },
       onEachFeature: (feature, layer) => {
@@ -170,17 +258,27 @@ const drawIsochroneLayers = () => {
           layer.bindPopup(`<b>≤ ${p.interval_min} мин</b><br/>Узлов: ${p.reachable_nodes || '—'}`)
         }
       },
-    }).addTo(map)
+    },
+    ).addTo(map)
+
+    if (pedGraphLayer) pedGraphLayer.bringToBack()
 
     const bounds = isochroneLayer.getBounds()
-    if (bounds.isValid()) {
+    const origin = isochroneOrigin?.value
+    const spanOk =
+      bounds.isValid() &&
+      Math.abs(bounds.getNorth() - bounds.getSouth()) < 2 &&
+      Math.abs(bounds.getEast() - bounds.getWest()) < 3
+    if (spanOk) {
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 })
+    } else if (origin?.length === 2) {
+      map.setView([origin[1], origin[0]], 13)
     }
   }
 
-  const origin = isochroneOrigin?.value
-  if (origin?.length === 2) {
-    originMarker = L.circleMarker([origin[1], origin[0]], {
+  const originPt = isochroneOrigin?.value
+  if (originPt?.length === 2) {
+    originMarker = L.circleMarker([originPt[1], originPt[0]], {
       radius: 8,
       color: '#1d4ed8',
       weight: 3,
@@ -397,7 +495,7 @@ watch(
         class="pointer-events-auto bg-primary-50 border border-primary-200 rounded-xl shadow-lg px-3 py-2 text-[11px] text-primary-900 leading-snug"
       >
         <span class="font-semibold">Доступность:</span>
-        клик по карте — точка объекта. Затем «Построить зоны» в панели слева.
+        клик по карте — точка объекта. Ставьте точку на <b>серую линию</b> графа (улица/тротуар).
       </div>
       <div
         v-else-if="props.data"
@@ -423,7 +521,18 @@ watch(
     </div>
 
     <!-- Map Legend -->
-    <div v-if="!heatmapMode" class="absolute bottom-6 right-6 z-[1000] bg-white/90 backdrop-blur-md p-3 rounded-xl border border-gray-200 shadow-xl w-36 animate-in fade-in slide-in-from-bottom-4">
+    <div
+      v-if="showPedestrianGraph?.value && !heatmapMode"
+      class="absolute bottom-6 left-14 z-[1000] bg-white/90 backdrop-blur-md p-3 rounded-xl border border-gray-200 shadow-xl max-w-[200px]"
+    >
+      <h4 class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Пеший граф</h4>
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-0.5 bg-slate-500 opacity-70"></div>
+        <span class="text-xs text-gray-600">Улицы и тротуары сети</span>
+      </div>
+      <p class="text-[10px] text-gray-500 mt-2 leading-snug">Точку ставьте на линию — иначе зона может быть неверной.</p>
+    </div>
+    <div v-if="!heatmapMode && !showPedestrianGraph?.value" class="absolute bottom-6 right-6 z-[1000] bg-white/90 backdrop-blur-md p-3 rounded-xl border border-gray-200 shadow-xl w-36 animate-in fade-in slide-in-from-bottom-4">
       <h4 class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Легенда скорости</h4>
       <div class="space-y-1.5">
         <div class="flex items-center gap-2">

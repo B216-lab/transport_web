@@ -17,7 +17,7 @@ const analysisAreaGeometry = ref(null)
 const isochroneOrigin = ref(null)
 const isochroneResult = shallowRef(null)
 const isochronePickMode = ref(false)
-
+const showPedestrianGraph = ref(false)
 // Provide shared state/actions
 provide('analysisResult', analysisResult)
 provide('isLoading', isLoading)
@@ -25,7 +25,7 @@ provide('analysisAreaGeometry', analysisAreaGeometry)
 provide('isochroneOrigin', isochroneOrigin)
 provide('isochroneResult', isochroneResult)
 provide('isochronePickMode', isochronePickMode)
-
+provide('showPedestrianGraph', showPedestrianGraph)
 const toggleSidebar = () => {
   isSidebarOpen.value = !isSidebarOpen.value
 }

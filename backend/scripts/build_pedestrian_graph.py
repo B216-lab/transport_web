@@ -25,6 +25,7 @@ if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
 from graph_store import default_geojson_path, default_pickle_path, project_root  # noqa: E402
+from data_paths import default_contours_path  # noqa: E402
 
 _transformer_to_m = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
@@ -302,6 +303,17 @@ def main() -> None:
         action="store_true",
         help="Не фильтровать по highway (если в QGIS уже отобрана пешеходная сеть)",
     )
+    parser.add_argument(
+        "--elevation",
+        action="store_true",
+        help="Учесть изолинии (contours.geojson), если файл найден",
+    )
+    parser.add_argument(
+        "--contours",
+        default=None,
+        help="Путь к GeoJSON изолиний (иначе авто-поиск)",
+    )
+    parser.add_argument("--slope-k", type=float, default=6.0, help="Коэффициент уклона")
     args = parser.parse_args()
 
     if not os.path.isfile(args.input):
@@ -319,6 +331,16 @@ def main() -> None:
         speed_kmh=args.speed_kmh,
         apply_filter=not args.no_filter,
     )
+
+    contours = args.contours or default_contours_path()
+    if args.elevation and contours:
+        from elevation import apply_elevation_to_graph
+
+        apply_elevation_to_graph(graph, contours_path=contours, slope_k=args.slope_k)
+        print(f"  Рельеф: {contours}")
+    elif args.elevation:
+        print("  Рельеф: contours.geojson не найден — пропуск")
+
     with open(args.output, "wb") as f:
         pickle.dump(graph, f, protocol=pickle.HIGHEST_PROTOCOL)
 
