@@ -317,6 +317,11 @@ def _build_geojson_from_db(req: AnalyzeDbRequest) -> Dict[str, Any]:
     return {"type": "FeatureCollection", "features": features}
 
 
+@app.options("/analyze")
+async def options_analyze():
+    return {"message": "OK"}
+
+
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     try:
