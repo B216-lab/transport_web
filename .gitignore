@@ -9,8 +9,14 @@ backend/.env
 !.env.example
 !backend/.env.example
 
-# Runtime data and logs
-data/
+# IrkBus collector output (large daily jsonl; regenerated on server)
+data/irkbus/raw/*
+!data/irkbus/raw/.gitkeep
+data/irkbus/features/*
+!data/irkbus/features/.gitkeep
+data/irkbus/logs/*
+!data/irkbus/logs/.gitkeep
+data/irkbus/latest.geojson
 *.log
 
 # Dependencies/build output
